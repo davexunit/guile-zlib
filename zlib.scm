@@ -136,7 +136,7 @@
 
 (define (uncompress bv)
   "Uncompresses bytevector and returns a bytevector containing
-the uncompressed data. Returns #f on error."
+the uncompressed data."
   (define (try-uncompress length)
     (let* ((dest (make-bytevector (* (sizeof uint8) length)))
            (dest-length (make-bytevector (sizeof unsigned-long))))
