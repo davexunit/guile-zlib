@@ -178,13 +178,13 @@ uncompressed data. Return #f on error."
 (define %default-adler32 (%adler32 0 %null-pointer 0))
 (define %default-crc32   (%crc32   0 %null-pointer 0))
 
-(define* (adler32 data #:optional (value default-adler32))
+(define* (adler32 data #:optional (value %default-adler32))
   "Computes adler32 checksum with optional starting value."
   (let ((pointer (bytevector->pointer (string->bytevector data)))
         (length  (string-length data)))
     (%adler32 value pointer length)))
 
-(define* (crc32 data #:optional (value default-crc32))
+(define* (crc32 data #:optional (value %default-crc32))
   "Computes crc32 checksum with optional starting value."
   (let ((pointer (bytevector->pointer (string->bytevector data)))
         (length  (string-length data)))
