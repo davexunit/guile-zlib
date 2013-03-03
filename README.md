@@ -3,6 +3,15 @@ guile-zlib
 
 A simple zlib wrapper for GNU Guile.
 
+Install
+-------
+```
+./autogen.sh
+./configure
+make
+sudo make install
+```
+
 Usage
 -----
 ```
