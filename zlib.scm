@@ -118,31 +118,34 @@
 (define-foreign %crc32
   unsigned-long "crc32" (list unsigned-long '* unsigned-int))
 
-;; Couldn't find a string conversion procedure that could handle null
-;; characters and the like that are in zlib encoded strings, so I
-;; wrote my own.
-(define (bytevector->string bv)
-  (string-trim-right (list->string (map integer->char
-                                        (bytevector->u8-list bv)))
-                     #\nul))
+;; There is a bit of guesswork involved when creating the bytevectors
+;; to store compressed/uncompressed data in. This procedure provides a
+;; convenient way to copy the portion of a bytevector that was
+;; actually used.
+(define (bytevector-copy-region bv start end)
+  (let* ((length (- end start))
+         (new-bv (make-bytevector length)))
+    (bytevector-copy! bv start new-bv 0 length)
+    new-bv))
 
-(define (string->bytevector str)
-  (u8-list->bytevector (map char->integer (string->list str))))
+;; uncompress/compress take a bytevector that zlib writes the size of
+;; the returned data to. This procedure saves me a few keystrokes when
+;; fetching that value.
+(define (buffer-length bv)
+  (bytevector-u64-native-ref bv 0))
 
-(define (uncompress data)
-  "Uncompresses data string and returns a string containing the
-uncompressed data. Return #f on error."
-  (define source (string->bytevector data))
-
+(define (uncompress bv)
+  "Uncompresses bytevector and returns a bytevector containing
+the uncompressed data. Returns #f on error."
   (define (try-uncompress length)
     (let* ((dest (make-bytevector (* (sizeof uint8) length)))
            (dest-length (make-bytevector (sizeof unsigned-long))))
       (bytevector-u64-native-set! dest-length 0 length)
       (values (%uncompress (bytevector->pointer dest)
                    (bytevector->pointer dest-length)
-                   (bytevector->pointer source)
+                   (bytevector->pointer bv)
                    length)
-              (bytevector->string dest))))
+              (bytevector-copy-region dest 0 (buffer-length dest-length)))))
 
   ;; We don't know how much space we need to store the uncompressed
   ;; data. So, we make an initial guess and keep increasing buffer
@@ -150,30 +153,41 @@ uncompressed data. Return #f on error."
   (define (step-buffer-length length)
     (inexact->exact (round (* length 1.5))))
 
-  (let try-again ((length (step-buffer-length (string-length data))))
-    (receive (ret-code uncompressed-data)
-        (try-uncompress length)
-      ;; return code -5 means that destination buffer was too small.
-      ;; return code  0 means everything went OK.
-      (cond ((= ret-code -5)
-             (try-again (step-buffer-length length)))
-            ((= ret-code 0)
-             uncompressed-data)
-            (else
-             #f)))))
+  (let try-again ((tries 1)
+                  (length (step-buffer-length (bytevector-length bv))))
+    ;; Bail after so many failed attempts. This shouldn't happen, but
+    ;; I don't like the idea of a potentially unbounded loop that
+    ;; keeps allocating larger and larger chunks of memory.
+    (if (> tries 10)
+        (throw 'zlib-uncompress-error)
+        (receive (ret-code uncompressed-data)
+            (try-uncompress length)
+          ;; return code -5 means that destination buffer was too small.
+          ;; return code  0 means everything went OK.
+          (cond ((= ret-code -5)
+                 (try-again (1+ tries) (step-buffer-length length)))
+                ((= ret-code 0)
+                 uncompressed-data)
+                (else
+                 (throw 'zlib-uncompress-error)))))))
 
-(define (compress data)
-  "Compresses data string and returns a string containing the compressed data."
-  (let* ((src-length (string-length data))
-         (dest-length (%compress-bound src-length))
-         (dest (make-bytevector (* (sizeof uint8) dest-length)))
-         (dest-length-bv (make-bytevector (sizeof unsigned-long))))
+(define (compress bv)
+  "Compresses bytevector and returns a bytevector containing the compressed data."
+  (let* ((bv-length      (bytevector-length bv))
+         (dest-length    (%compress-bound bv-length))
+         (dest-bv        (make-bytevector dest-length))
+         (dest-length-bv (make-bytevector (sizeof unsigned-long)))
+         (ret-code       0))
     (bytevector-u64-native-set! dest-length-bv 0 dest-length)
-    (%compress (bytevector->pointer dest)
-               (bytevector->pointer dest-length-bv)
-               (string->pointer data)
-               src-length)
-    (bytevector->string dest)))
+    (set! ret-code
+          (%compress (bytevector->pointer dest-bv)
+                     (bytevector->pointer dest-length-bv)
+                     (bytevector->pointer bv)
+                     bv-length))
+    (if (= ret-code 0)
+        (bytevector-copy-region dest-bv 0
+                                (buffer-length dest-length-bv))
+        (throw 'zlib-compress-error))))
 
 (define %default-adler32 (%adler32 0 %null-pointer 0))
 (define %default-crc32   (%crc32   0 %null-pointer 0))
