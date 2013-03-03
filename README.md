@@ -6,8 +6,9 @@ A simple zlib wrapper for GNU Guile.
 Usage
 -----
 ```
-scheme@(guile-user)> (uncompress (compress "Hello. This is a test."))
-$2 = "Hello. This is a test."
+scheme@(guile-user)> (use-modules (zlib))
+scheme@(guile-user)> (utf8->string (uncompress (compress (string->utf8 "hello, world!"))))
+$1 = "hello, world!"
 ```
 
 Install
